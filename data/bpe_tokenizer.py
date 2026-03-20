@@ -214,7 +214,6 @@ def load_shard(path):
     num_tokens = int(header[2])
     return np.fromfile(path, dtype="<u2", count=num_tokens, offset=256 * 4)
 
-
 if __name__ == "__main__":
     total_start = time.time()
     
@@ -225,7 +224,7 @@ if __name__ == "__main__":
 
     print("=== Collecting words ===")
     collect_start = time.time()
-    num_train_docs = 500
+    num_train_docs = 50000
     words = {}
     for i, text, in enumerate(sample_text(files)):
         if i >= num_train_docs:
