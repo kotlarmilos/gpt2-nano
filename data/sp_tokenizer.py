@@ -34,7 +34,7 @@ def train_sp(files, num_train_docs, vocab_size):
 
 if __name__ == "__main__":
     files = download_dataset(5)
-    sp = train_sp(files, num_train_docs=500, vocab_size=1024)
+    sp = train_sp(files, num_train_docs=50000, vocab_size=1024)
     export_shards(files, lambda text: sp.encode(text, out_type=int),
-        shard_size=10000000, num_train_docs=500,
+        shard_size=10000000, num_train_docs=50000,
         shards_path="data/sp-shards")
