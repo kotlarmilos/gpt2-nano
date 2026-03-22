@@ -6,6 +6,8 @@ A GPT-2-grade model built from scratch in PyTorch. The BPE tokenizer and transfo
 
 This is part of a learning series where the goal is to understand every layer of the stack, from raw text to generated output.
 
+**[Model on Hugging Face](https://huggingface.co/kotlarmilos/gpt2-nano)**
+
 ## Quick Start
 
 ```bash
