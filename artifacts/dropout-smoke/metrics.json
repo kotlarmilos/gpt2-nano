@@ -1,0 +1,90 @@
+{
+  "status": "measured",
+  "device": "mps",
+  "seed": 1337,
+  "config": {
+    "vocab_size": 9157,
+    "context_len": 64,
+    "embedding_dim": 64,
+    "num_layers": 2,
+    "num_heads": 4,
+    "dropout": 0.1
+  },
+  "batch_size": 2,
+  "learning_rate": 0.0003,
+  "weight_decay": 0.1,
+  "num_steps": 10,
+  "metrics": [
+    {
+      "step": 0,
+      "optimization_loss": 9.528336524963379,
+      "train_loss": 9.36143684387207,
+      "validation_loss": 9.275278091430664,
+      "elapsed_seconds": 0.7049081325531006
+    },
+    {
+      "step": 1,
+      "optimization_loss": 9.329233169555664,
+      "train_loss": 9.191304206848145,
+      "validation_loss": 9.179754257202148,
+      "elapsed_seconds": 0.7264251708984375
+    },
+    {
+      "step": 2,
+      "optimization_loss": 9.243943214416504,
+      "train_loss": 9.085945129394531,
+      "validation_loss": 9.092126846313477,
+      "elapsed_seconds": 0.7451090812683105
+    },
+    {
+      "step": 3,
+      "optimization_loss": 9.221181869506836,
+      "train_loss": 9.047723770141602,
+      "validation_loss": 9.016797065734863,
+      "elapsed_seconds": 0.763293981552124
+    },
+    {
+      "step": 4,
+      "optimization_loss": 9.080737113952637,
+      "train_loss": 8.976279258728027,
+      "validation_loss": 8.955235481262207,
+      "elapsed_seconds": 0.7817931175231934
+    },
+    {
+      "step": 5,
+      "optimization_loss": 9.111271858215332,
+      "train_loss": 8.988924980163574,
+      "validation_loss": 8.908408164978027,
+      "elapsed_seconds": 0.7989859580993652
+    },
+    {
+      "step": 6,
+      "optimization_loss": 8.9071626663208,
+      "train_loss": 8.812239646911621,
+      "validation_loss": 8.875960350036621,
+      "elapsed_seconds": 0.8161861896514893
+    },
+    {
+      "step": 7,
+      "optimization_loss": 8.956182479858398,
+      "train_loss": 8.914177894592285,
+      "validation_loss": 8.856534004211426,
+      "elapsed_seconds": 0.8331661224365234
+    },
+    {
+      "step": 8,
+      "optimization_loss": 8.968498229980469,
+      "train_loss": 8.868971824645996,
+      "validation_loss": 8.847509384155273,
+      "elapsed_seconds": 0.8497941493988037
+    },
+    {
+      "step": 9,
+      "optimization_loss": 8.885209083557129,
+      "train_loss": 8.78171443939209,
+      "validation_loss": 8.845186233520508,
+      "elapsed_seconds": 0.8655009269714355
+    }
+  ],
+  "total_seconds": 0.9165771007537842
+}

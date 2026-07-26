@@ -11,11 +11,48 @@ This is part of a learning series where the goal is to understand every layer of
 ## Quick Start
 
 ```bash
-pip install -r requirements.txt
+python3.13 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[data]"
 
 # Download data, train tokenizer, export shards, then train GPT
 python -m data.bpe_tokenizer && python -m src.gpt
 ```
+
+## Dropout, KV caching, and KL divergence
+
+The model now has configurable dropout while preserving the original
+zero-dropout architecture. Generation supports an incremental KV-cache, and
+`src.objectives` provides token-distribution KL measurement plus a
+KL-regularized training objective.
+
+Run the targeted tests and the local cache smoke benchmark with:
+
+```bash
+python -m unittest discover -s tests -v
+python scripts/benchmark_cache.py
+```
+
+The smoke benchmark uses a small randomly initialized model. It validates the
+implementation and output format but is not a publication result. Full
+experiment settings and pending artifacts are listed in
+`configs/publication.json` and `artifacts/manifest.json`.
+
+The Colab wrapper runs one publication job at a time so separate runtimes can
+cover the sweep without exceeding a single session. It downloads and verifies
+the published checkpoint, tokenizer, and token shard from the sources recorded
+in `artifacts/manifest.json`.
+
+```bash
+EXPERIMENT=dropout DROPOUT=0.1 SEED=1337 ./scripts/colab_publication.sh
+EXPERIMENT=kl KL_BETA=0.05 SEED=1337 ./scripts/colab_publication.sh
+EXPERIMENT=cache ./scripts/colab_publication.sh
+```
+
+Run `EXPERIMENT=plan ./scripts/colab_publication.sh` to write the full command
+matrix without starting training. KL jobs initialize from the published model,
+keep that checkpoint frozen as the reference distribution, and record
+held-out KL together with task loss.
 
 ## Architecture
 

@@ -1,0 +1,11 @@
+{
+  "vocab_size": 256,
+  "context_len": 64,
+  "embedding_dim": 64,
+  "num_layers": 2,
+  "num_heads": 4,
+  "dropout": 0.1,
+  "batch_size": 2,
+  "num_steps": 10,
+  "seed": 1337
+}
