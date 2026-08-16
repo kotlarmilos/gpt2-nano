@@ -57,8 +57,8 @@ KL together.
 
 ### KV-cache memory
 
-For batch \(B\), layers \(L\), heads \(H\), head dimension \(d_h\), context \(C\),
-and element size \(s\), the cache occupies
+For batch \\(B\\), layers \\(L\\), heads \\(H\\), head dimension \\(d_h\\), context \\(C\\),
+and element size \\(s\\), the cache occupies
 
 $$
 M_{\mathrm{KV}} = 2BLHCd_hs.
@@ -69,7 +69,7 @@ reports both sides of that trade at several prompt lengths.
 
 ### KL divergence
 
-For the adapted distribution \(p\) and reference distribution \(q\), I measure
+For the adapted distribution \\(p\\) and reference distribution \\(q\\), I measure
 
 $$
 D_{\mathrm{KL}}(p \parallel q)
@@ -89,7 +89,7 @@ $$
 \beta D_{\mathrm{KL}}(p_\theta \parallel p_{\mathrm{ref}}).
 $$
 
-The coefficient \(\beta\) controls how much movement the adaptation is allowed to
+The coefficient \\(\beta\\) controls how much movement the adaptation is allowed to
 make. The point is to show the trade rather than select one universal value.
 
 ## In the code
@@ -118,7 +118,7 @@ all 16 generated positions for continued decoding. The short prompt is expected 
 benefit less because model launch and sampling overhead still dominate. Longer
 prompts expose more repeated prefix work.
 
-### EXTENSION. KV-cache numerical equivalence under dtype
+### KV-cache numerical equivalence under dtype
 
 I ran a development-scale local extension with `python -m src.kv_equivalence`
 using `configs/kv_equivalence.json`, the restored `checkpoints/final.pt`, three
@@ -143,9 +143,6 @@ contains the implementation, deterministic smoke checks, benchmark format, and
 artifact manifest. I will not fill the dropout or KL result tables from a random
 model or a single smoke run because those numbers would not answer the questions
 above.
-
-<!-- Insert the signed-off dropout table and loss figure here. -->
-<!-- Insert the signed-off KL table here. -->
 
 ## References
 
