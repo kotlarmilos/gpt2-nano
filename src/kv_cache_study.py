@@ -981,6 +981,7 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
 
     # --- Corpus ---
     corpus_hash: str | None = None
+    noise_train_seqs: list[list[int]] | None = None
     if corpus_path is not None:
         tokens = load_token_shard(corpus_path)
         if int(tokens.max()) >= model.config.vocab_size:
@@ -991,6 +992,23 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
         corpus_hash = sha256_file(corpus_path)
         calib_seqs = token_windows(tokens, calib_start, calib_end, seq_len)
         val_seqs = token_windows(tokens, val_start, val_end, seq_len)
+        if finetune_cfg is not None:
+            noise_train_start = int(
+                finetune_cfg.get("train_start", calib_start)
+            )
+            noise_train_end = int(
+                finetune_cfg.get("train_end", calib_end)
+            )
+            noise_train_seqs = token_windows(
+                tokens,
+                noise_train_start,
+                noise_train_end,
+                int(finetune_cfg.get("context_len", seq_len)),
+            )
+            if not noise_train_seqs:
+                raise ValueError(
+                    "noise fine-tuning window produced no sequences"
+                )
     else:
         rng = np.random.default_rng(seed)
         calib_seqs = [
@@ -1072,7 +1090,7 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
         )
         finetune_results = run_noise_finetune(
             checkpoint_path=checkpoint_path,
-            train_sequences=calib_seqs,
+            train_sequences=noise_train_seqs or calib_seqs,
             val_sequences=val_seqs,
             baseline_logits_list=baseline_val,
             policy=finetune_policy,
@@ -1113,6 +1131,16 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
             "num_calib_sequences": len(calib_seqs),
             "num_val_sequences": len(val_seqs),
             "overlap": False,
+            "noise_train_start": (
+                int(finetune_cfg.get("train_start", calib_start))
+                if finetune_cfg is not None
+                else None
+            ),
+            "noise_train_end": (
+                int(finetune_cfg.get("train_end", calib_end))
+                if finetune_cfg is not None
+                else None
+            ),
         },
         "sensitivity": sensitivity,
         "policies": [
