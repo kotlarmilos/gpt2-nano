@@ -13,8 +13,10 @@ def categorical_kl(
 ) -> Tensor:
     if model_logits.shape != reference_logits.shape:
         raise ValueError("model and reference logits must have identical shapes")
-    model_log_probs = F.log_softmax(model_logits, dim=-1)
-    reference_log_probs = F.log_softmax(reference_logits.detach(), dim=-1)
+    model_log_probs = F.log_softmax(model_logits.float(), dim=-1)
+    reference_log_probs = F.log_softmax(
+        reference_logits.detach().float(), dim=-1
+    )
     pointwise = model_log_probs.exp() * (model_log_probs - reference_log_probs)
     per_distribution = pointwise.sum(dim=-1)
     if reduction == "none":
@@ -37,7 +39,7 @@ def kl_regularized_loss(
     if beta < 0:
         raise ValueError("beta cannot be negative")
     task_loss = F.cross_entropy(
-        model_logits.reshape(-1, model_logits.size(-1)),
+        model_logits.float().reshape(-1, model_logits.size(-1)),
         targets.reshape(-1),
     )
     kl_loss = categorical_kl(model_logits, reference_logits)

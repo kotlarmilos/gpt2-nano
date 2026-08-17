@@ -1,0 +1,21 @@
+{
+  "device": "cpu",
+  "dtype": "float32",
+  "seed": 1337,
+  "calib_start": 0,
+  "calib_end": 64,
+  "val_start": 64,
+  "val_end": 128,
+  "seq_len": 8,
+  "kl_budgets": [0.005, 0.02, 0.1],
+  "time_sequences": 1,
+  "output_dir": "artifacts/kv-cache-smoke",
+  "model_config": {
+    "vocab_size": 64,
+    "context_len": 16,
+    "embedding_dim": 16,
+    "num_layers": 2,
+    "num_heads": 4,
+    "dropout": 0.0
+  }
+}
