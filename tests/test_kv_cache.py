@@ -9,6 +9,7 @@ import copy
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 import torch
@@ -31,6 +32,7 @@ from src.kv_quant import (
 from src.kv_cache_study import (
     allocate_policy_greedy,
     build_named_policies,
+    configure_deterministic_execution,
     compute_sensitivity_matrices,
     evaluate_policy,
     load_token_shard,
@@ -840,6 +842,17 @@ class ArtifactSchemaTests(unittest.TestCase):
         self.assertIn("config_sha256", payload["hashes"])
         self.assertIn("noise_selection_start", payload["splits"])
         self.assertIn("noise_selection_end", payload["splits"])
+
+    def test_calibration_proxy_is_labeled(self) -> None:
+        payload = self._run_smoke()
+        self.assertIn("single-head", payload["calibration_score_definition"])
+        for result in payload["validation"]["results"]:
+            self.assertNotIn("calibration_budget_error", result)
+
+    def test_cuda_determinism_requires_cublas_configuration(self) -> None:
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "CUBLAS_WORKSPACE_CONFIG"):
+                configure_deterministic_execution(torch.device("cuda"))
 
 
 if __name__ == "__main__":

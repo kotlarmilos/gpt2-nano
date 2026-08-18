@@ -27,6 +27,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 import platform
 from pathlib import Path
 import subprocess
@@ -104,11 +105,26 @@ def collect_environment(device: torch.device) -> dict[str, Any]:
         "python": platform.python_version(),
         "torch": torch.__version__,
         "device": str(device),
+        "deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
+        "cublas_workspace_config": os.environ.get("CUBLAS_WORKSPACE_CONFIG"),
     }
     if device.type == "cuda":
         env["cuda_version"] = torch.version.cuda
         env["cuda_device_name"] = torch.cuda.get_device_name(device)
     return env
+
+
+def configure_deterministic_execution(device: torch.device) -> None:
+    torch.use_deterministic_algorithms(True)
+    if (
+        device.type == "cuda"
+        and os.environ.get("CUBLAS_WORKSPACE_CONFIG")
+        not in {":4096:8", ":16:8"}
+    ):
+        raise RuntimeError(
+            "CUDA publication runs require CUBLAS_WORKSPACE_CONFIG=:4096:8 "
+            "or CUBLAS_WORKSPACE_CONFIG=:16:8"
+        )
 
 
 def synchronize(device: torch.device) -> None:
@@ -936,6 +952,7 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
     source_state = git_source_state(cwd)
     seed: int = int(cfg.get("seed", 1337))
     device = select_device(str(cfg.get("device", "auto")))
+    configure_deterministic_execution(device)
     dtype_name: str = str(cfg.get("dtype", "float32"))
     dtype = dtype_from_name(dtype_name)
 
@@ -1094,9 +1111,10 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
             time_sequences=time_sequences_n,
             policy_label=label,
         )
-        # Budget error: predicted KL from calibration vs measured validation KL
+        # The budget applies to the additive single-head calibration proxy. The
+        # gap is diagnostic and is not a held-out KL budget error.
         if pol_entry.get("predicted_kl") is not None:
-            metrics["calibration_budget_error"] = (
+            metrics["calibration_proxy_gap"] = (
                 pol_entry["predicted_kl"] - metrics["mean_kl"]
             )
         validation_results.append(metrics)
@@ -1187,6 +1205,10 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
             ),
         },
         "sensitivity": sensitivity,
+        "calibration_score_definition": (
+            "sum of mean output KL values from independent single-head "
+            "quantization interventions"
+        ),
         "policies": [
             {
                 "label": p["label"],
@@ -1225,8 +1247,9 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
             "Sensitivity computation assumes per-head independence.  Cross-head "
             "interactions are not modeled.",
             "Greedy marginal-KL-per-byte allocation is not globally optimal.",
-            "Predicted KL from calibration uses a linear independence sum that "
-            "can misestimate interactions; validate calibration_budget_error.",
+            "The KL budget applies to an additive single-head calibration proxy, "
+            "not a bound on held-out joint output KL. Cross-head interactions can "
+            "make the proxy differ from measured KL.",
             "Cache-noise fine-tuning is a testable intervention, not established "
             "novelty.  Per-head mixed precision is prior art (KVTuner ICML 2025).",
         ],
