@@ -248,3 +248,69 @@ region that limits how far one update may move the output distribution. The arti
 makes the honest point that the KL term measures movement and not quality. A model
 can lower its KL to the reference while getting no better at the task, so `beta`
 sets a leash length, not a target.
+
+## Mixed-precision KV allocation
+
+Uniform cache quantization gives every head the same precision. That is simple,
+but heads do not move the output distribution equally when quantized. The
+publication extension measures one intervention for every layer and head.
+
+```text
+sensitivity[l, h, b] =
+    mean KL(output with head l,h at b bits || all-BF16 output)
+```
+
+Here `b` is INT8 or INT4. All other heads remain BF16 during that measurement.
+The allocator starts from BF16 and considers two transitions for each head.
+
+```text
+BF16 -> INT8
+INT8 -> INT4
+```
+
+Each transition has a byte saving and an added single-head KL score. Greedy
+allocation chooses the feasible transition with the lowest added score per byte
+saved until no further transition fits the configured proxy budget.
+
+```text
+priority = added single-head KL / bytes saved
+```
+
+The sum of single-head KL measurements is only a calibration proxy. Output logits
+couple all heads through residual connections and later layers, so the joint
+effect need not equal the sum. The artifact therefore reports held-out joint KL
+separately and calls their difference `calibration_proxy_gap`. The budget does not
+guarantee that measured KL is below the same number.
+
+On the trained checkpoint, the `0.01` proxy budget yields 70 INT4 heads, 19 INT8
+heads, and 7 BF16 heads. Its persistent cache is 579,840 bytes for the measured
+validation shape, compared with 1,572,864 bytes for BF16. Mean held-out output KL
+is `0.001528`, between uniform INT8 at `0.000258` and uniform INT4 at `0.009261`.
+The mixed policy exposes an intermediate memory-quality point.
+
+`QuantizedHeadTensor.append` in `src/kv_quant.py` quantizes only the new sequence
+positions. Old cache history remains packed. `compute_sensitivity_matrices` in
+`src/kv_cache_study.py` runs the single-head interventions, and
+`allocate_policy_greedy` constructs the policy.
+
+## Why cache-noise training did not help
+
+The robustness intervention replaces exact keys and values with quantization-
+matched noisy versions during a short adaptation. Its loss combines next-token
+cross-entropy with KL to the frozen original checkpoint.
+
+```text
+loss = cross_entropy(student, targets)
+     + beta * KL(student || frozen_reference)
+```
+
+The final three-seed mixed-policy KL is `0.001515 +/- 0.000001`, only `0.000013`
+below the untuned value. Token agreement changes from 97.85 percent to
+`97.82 +/- 0.09` percent. Full-precision KL moves from zero to
+`0.000189 +/- 0.000002`, which shows that the weights changed even without cache
+quantization.
+
+These measurements do not isolate a useful robustness gain. Any small quantized
+KL change contains both altered model outputs and altered quantization response.
+A stronger experiment would compare longer training, more seeds, and an
+unquantized adaptation control with equal optimizer steps.

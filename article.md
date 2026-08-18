@@ -101,6 +101,17 @@ cached decode path and the key-value tensors live alongside the attention block 
 in `src/objectives.py`. `LEARNING.md` derives each result from first principles
 and points at the exact functions and lines.
 
+The publication extension in `src/kv_cache_study.py` measures the output KL caused
+by quantizing one cache head at a time. A greedy allocator then lowers heads from
+BF16 to INT8 and INT4 under a sum of those single-head KL measurements. That sum
+is an additive calibration proxy. It is not a bound on held-out joint output KL
+and it does not model interactions between heads.
+
+The quantized cache in `src/kv_quant.py` keeps history packed and quantizes only
+new positions. Every policy, including the BF16 reference, follows the same
+incremental execution path. This avoids attributing ordinary cached-versus-
+uncached rounding differences to quantization.
+
 ## Results and honesty boundary
 
 I ran the cache implementation against the published 44M parameter checkpoint on
@@ -135,6 +146,56 @@ numerical claim that the lower-precision path accumulates larger logit
 differences. The artifact lives at
 `artifacts/kv-equivalence-dev-local/results.json`.
 
+### Allocating KV precision under a KL calibration budget
+
+I ran the mixed-precision study on an NVIDIA RTX A5000 with PyTorch 2.4.1 and
+BF16 model execution. Calibration uses the first 512 corpus tokens. Final
+validation uses 2,048 tokens beginning at position 9,000,000. The checkpoint,
+corpus, config, split boundaries, source commit, and deterministic CUDA settings
+are recorded in `artifacts/kv-cache-publication/results.json`.
+
+| Policy | Mean held-out KL | Token agreement | Cache size | Compression versus BF16 |
+|---|---:|---:|---:|---:|
+| Uniform INT8 | 0.000258 | 99.07% | 811,008 bytes | 1.94x |
+| Mixed 0.01 proxy budget | 0.001528 | 97.85% | 579,840 bytes | 2.71x |
+| Uniform INT4 | 0.009261 | 94.34% | 417,792 bytes | 3.76x |
+| All BF16 | 0 | 100% | 1,572,864 bytes | 1.00x |
+
+The mixed policy assigns 70 heads to INT4, 19 to INT8, and 7 to BF16. It creates
+an intermediate memory-quality point that the uniform policies cannot express.
+The allocator predicts calibration proxy `0.009986`, while held-out joint output
+KL is `0.001528`. The difference shows why the proxy must guide allocation rather
+than serve as a claimed KL guarantee.
+
+The larger configured budgets all select uniform INT4 because no precision below
+four bits is available. The five-value budget grid therefore produces only one
+nontrivial mixed policy. The result demonstrates controlled heterogeneous
+allocation, not a dense Pareto frontier or a globally optimal policy.
+
+Quantized execution is slower than BF16 in this readable implementation because
+Python code reconstructs full-precision keys and values for attention. Those
+timings measure simulation overhead and do not support an inference-speed claim.
+The defensible systems result is persistent cache size.
+
+### Cache-noise training is a null result
+
+I selected a conservative learning rate and KL weight on reserved tokens from
+positions 4,096 through 5,120, then trained three seeds for 50 steps without
+looking at final validation. The mixed-policy KL after noise training is
+`0.001515 ± 0.000001`, compared with `0.001528` before training. Token agreement
+is `97.82% ± 0.09%`, compared with `97.85%` before training. The tuned full-
+precision model also drifts from the original checkpoint by KL
+`0.000189 ± 0.000002`.
+
+The change is too small and confounded by weight drift to support a robustness
+improvement. This negative result still answers the intervention question. At
+this scale, the simple cache-noise objective does not materially improve the
+measured mixed-precision policy.
+
+The result artifact is committed. The three 101.8 MB tuned checkpoints are
+excluded from Git and can be regenerated from the pinned source inputs and
+configuration.
+
 The dropout and KL tables come from the publication runs. The publication run
 sweeps 0.00, 0.05, 0.10, and 0.20 over three seeds for dropout, and reports task
 loss with held-out KL together across the same held-out token batches. Those
@@ -151,6 +212,8 @@ above.
 3. Schulman, J. et al. Proximal Policy Optimization Algorithms. 2017.
 4. Pope, R. et al. Efficiently Scaling Transformer Inference.
    arXiv:2211.05102, 2022.
+5. Hooper, C. et al. KVQuant. arXiv:2401.18079, 2024.
+6. Li, X. et al. KVTuner. arXiv:2502.04420, 2025.
 
 Code and model.
 

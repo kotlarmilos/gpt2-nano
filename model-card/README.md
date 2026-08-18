@@ -21,6 +21,13 @@ The published checkpoint predates these experiments. A trained-checkpoint
 KV-cache benchmark is measured locally on Apple M1. Dropout and KL publication
 runs remain pending, as recorded in the artifact manifest.
 
+The RTX A5000 extension allocates BF16, INT8, and INT4 cache precision per head
+under an additive single-head KL calibration proxy. The nontrivial mixed policy
+records 2.71x persistent-cache compression versus BF16, held-out output KL
+`0.001528`, and 97.85 percent token agreement. Its three-seed cache-noise
+adaptation is a null result rather than a robustness claim. See
+`artifacts/kv-cache-publication/results.json`.
+
 ## Intended use
 
 The model and code are educational. They are intended for studying transformer
@@ -55,4 +62,6 @@ recorded in `artifacts/manifest.json`.
 The original run used one seed and approximately 99M tokens. The model is too
 small and under-trained for reliable factual generation. Cache benchmarks on a
 random smoke model validate the implementation but are not evidence of
-publication-scale speedups.
+publication-scale speedups. The mixed-precision runner reconstructs full-
+precision tensors before attention, so its timing does not represent a fused
+quantized inference kernel.

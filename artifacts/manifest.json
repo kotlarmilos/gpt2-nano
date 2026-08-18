@@ -42,6 +42,26 @@
       "sha256": "bc47aba423ba538a698ca0c040b6a21fef7e9cada13f662ffe9cb08b308cd54a"
     },
     {
+      "path": "artifacts/kv-cache-publication/results.json",
+      "status": "publication-hardware-measured",
+      "description": "Deterministic per-head mixed-precision KV-cache study on an NVIDIA RTX A5000",
+      "sha256": "063dade7c10498be8aa7afcb0363eb69ba55dfec2903a58268eacbd01a707f61",
+      "config": "configs/kv_cache_publication.json",
+      "config_sha256": "156501a727413a913c2c0ed9e36e6105c90f8df3e33643b56e9b1bc7b5d8106f",
+      "checkpoint_sha256": "9a293ff319e7e11e7c5c553a5e4957a996493311d04b097933c1e2fcb49bf86e",
+      "corpus_sha256": "f08410ea036cc56b78ffc3f6edbf94f5a1d469aeb7c708bb56e4ce544623a69e",
+      "checkpoint_source": "https://huggingface.co/kotlarmilos/gpt2-nano/resolve/ee547b4112bce2d2557dd0975038035bab6c86eb/checkpoints/final.pt",
+      "corpus_source": "https://huggingface.co/kotlarmilos/gpt2-nano/resolve/ee547b4112bce2d2557dd0975038035bab6c86eb/bpe-shards/train_000000.bin",
+      "postprocessing": "Copied byte-for-byte from the RunPod output; no JSON fields changed after measurement.",
+      "run_log_sha256": "812a31589e165ae41af38579b45f43b9d38d4ae4abdf57a3724739753d8095f6",
+      "runner_hashes_sha256": "d006e0c07815a10cf20d6f10655416d77365ed3fe2e69cbea6560e55a714929a",
+      "untracked_noise_checkpoints": {
+        "artifacts/noise_tuned/noise_tuned_seed1337.pt": "f843633b1157c01c68118a96cf6442f9f57bfc341e5ff9dc1df30c8eeb22bc3c",
+        "artifacts/noise_tuned/noise_tuned_seed2026.pt": "5ac9ac38f7f02506cd30848c8f98304103e1c4c6d4d50b38ff764c8be8d91c7c",
+        "artifacts/noise_tuned/noise_tuned_seed9001.pt": "006fbb7e2bc47ea389f0d2f05059dd1d4a1d9c520f5672417d39ecaed471a9e8"
+      }
+    },
+    {
       "path": "artifacts/kl-publication.json",
       "status": "pending-publication-run",
       "description": "Held-out token-level KL sweep for adapted checkpoints"
@@ -50,25 +70,25 @@
       "path": "checkpoints/final.pt",
       "status": "restored-from-published-model",
       "sha256": "9a293ff319e7e11e7c5c553a5e4957a996493311d04b097933c1e2fcb49bf86e",
-      "source": "https://huggingface.co/kotlarmilos/gpt2-nano/resolve/main/checkpoints/final.pt"
+      "source": "https://huggingface.co/kotlarmilos/gpt2-nano/resolve/ee547b4112bce2d2557dd0975038035bab6c86eb/checkpoints/final.pt"
     },
     {
       "path": "data/bpe-tokenizer/vocab.json",
       "status": "restored-from-published-model",
       "sha256": "459dba6d2c6ae095718de3db92119bf5cefe19eb9dc0a88781687a5f74f7a4a3",
-      "source": "https://huggingface.co/kotlarmilos/gpt2-nano/resolve/main/bpe-tokenizer/vocab.json"
+      "source": "https://huggingface.co/kotlarmilos/gpt2-nano/resolve/ee547b4112bce2d2557dd0975038035bab6c86eb/bpe-tokenizer/vocab.json"
     },
     {
       "path": "data/bpe-tokenizer/merges.json",
       "status": "restored-from-published-model",
       "sha256": "fcdc81f4b7edc355b2b14132a2a5b8f18912d0839b5eef8786ba5b1884d6814e",
-      "source": "https://huggingface.co/kotlarmilos/gpt2-nano/resolve/main/bpe-tokenizer/merges.json"
+      "source": "https://huggingface.co/kotlarmilos/gpt2-nano/resolve/ee547b4112bce2d2557dd0975038035bab6c86eb/bpe-tokenizer/merges.json"
     },
     {
       "path": "data/bpe-shards/train_000000.bin",
       "status": "restored-from-published-model",
       "sha256": "f08410ea036cc56b78ffc3f6edbf94f5a1d469aeb7c708bb56e4ce544623a69e",
-      "source": "https://huggingface.co/kotlarmilos/gpt2-nano/resolve/main/bpe-shards/train_000000.bin"
+      "source": "https://huggingface.co/kotlarmilos/gpt2-nano/resolve/ee547b4112bce2d2557dd0975038035bab6c86eb/bpe-shards/train_000000.bin"
     },
     {
       "path": "space/gpt2_nano-0.2.0-py3-none-any.whl",

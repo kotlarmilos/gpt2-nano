@@ -38,6 +38,21 @@ implementation and output format but is not a publication result. Full
 experiment settings and pending artifacts are listed in
 `configs/publication.json` and `artifacts/manifest.json`.
 
+Run the trained-checkpoint mixed-precision KV study on CUDA with:
+
+```bash
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+python -m src.kv_cache_study --config configs/kv_cache_publication.json
+```
+
+The measured RTX A5000 study assigns 70 of 96 cache heads to INT4, 19 to INT8,
+and 7 to BF16 under the nontrivial `0.01` additive calibration-proxy budget. It
+records 2.71x persistent-cache compression versus BF16, held-out output KL
+`0.001528`, and 97.85 percent token agreement. The readable dequantization path
+does not provide a speedup. See `artifacts/kv-cache-publication/results.json`.
+The three 101.8 MB noise-tuned checkpoints are excluded from Git and can be
+regenerated with the command above.
+
 The Colab wrapper runs one publication job at a time so separate runtimes can
 cover the sweep without exceeding a single session. It downloads and verifies
 the published checkpoint, tokenizer, and token shard from the sources recorded
