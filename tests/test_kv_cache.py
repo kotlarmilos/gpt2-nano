@@ -812,6 +812,10 @@ class ArtifactSchemaTests(unittest.TestCase):
         payload = self._run_smoke()
         self.assertEqual(payload["schema_version"], "kv-cache-study-v1")
 
+    def test_git_state_is_captured_before_generated_outputs(self) -> None:
+        payload = self._run_smoke()
+        self.assertEqual(payload["hashes"]["git_state_captured"], "study_start")
+
 
 if __name__ == "__main__":
     unittest.main()

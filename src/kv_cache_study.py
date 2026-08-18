@@ -932,6 +932,8 @@ def run_noise_finetune(
 
 def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[str, Any]:
     """Run the full KV-cache quantization study and return the artifact payload."""
+    cwd = Path.cwd()
+    source_state = git_source_state(cwd)
     seed: int = int(cfg.get("seed", 1337))
     device = select_device(str(cfg.get("device", "auto")))
     dtype_name: str = str(cfg.get("dtype", "float32"))
@@ -1100,8 +1102,6 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
             output_dir=noise_output_dir,
         )
 
-    cwd = Path.cwd()
-    source_state = git_source_state(cwd)
     return {
         "schema_version": "kv-cache-study-v1",
         "status": "measured",
@@ -1117,6 +1117,7 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
         "hashes": {
             "checkpoint_sha256": checkpoint_hash,
             "corpus_sha256": corpus_hash,
+            "git_state_captured": "study_start",
             **source_state,
         },
         "environment": collect_environment(device),
