@@ -582,6 +582,25 @@ class SplitSeparationTests(unittest.TestCase):
                 }
             )
 
+    def test_study_rejects_overlapping_noise_selection_split(self) -> None:
+        with self.assertRaisesRegex(ValueError, "ordered and non-overlapping"):
+            run_study(
+                {
+                    "device": "cpu",
+                    "dtype": "float32",
+                    "calib_start": 0,
+                    "calib_end": 64,
+                    "val_start": 256,
+                    "val_end": 320,
+                    "noise_finetune": {
+                        "train_start": 64,
+                        "train_end": 192,
+                        "selection_start": 128,
+                        "selection_end": 256,
+                    },
+                }
+            )
+
 
 # ---------------------------------------------------------------------------
 # Metric formulas
@@ -815,6 +834,12 @@ class ArtifactSchemaTests(unittest.TestCase):
     def test_git_state_is_captured_before_generated_outputs(self) -> None:
         payload = self._run_smoke()
         self.assertEqual(payload["hashes"]["git_state_captured"], "study_start")
+
+    def test_hashes_and_optional_selection_split_are_explicit(self) -> None:
+        payload = self._run_smoke()
+        self.assertIn("config_sha256", payload["hashes"])
+        self.assertIn("noise_selection_start", payload["splits"])
+        self.assertIn("noise_selection_end", payload["splits"])
 
 
 if __name__ == "__main__":

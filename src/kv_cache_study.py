@@ -956,6 +956,32 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
     kl_budgets: list[float] = [float(b) for b in cfg.get("kl_budgets", [0.01, 0.05, 0.1])]
     time_sequences_n: int = int(cfg.get("time_sequences", 2))
     finetune_cfg: dict[str, Any] | None = cfg.get("noise_finetune")
+    if finetune_cfg is not None:
+        has_selection_start = "selection_start" in finetune_cfg
+        has_selection_end = "selection_end" in finetune_cfg
+        if has_selection_start != has_selection_end:
+            raise ValueError(
+                "noise_finetune selection_start and selection_end must be set together"
+            )
+        if has_selection_start:
+            noise_train_start = int(finetune_cfg.get("train_start", calib_start))
+            noise_train_end = int(finetune_cfg.get("train_end", calib_end))
+            selection_start = int(finetune_cfg["selection_start"])
+            selection_end = int(finetune_cfg["selection_end"])
+            if not (
+                calib_start
+                < calib_end
+                <= noise_train_start
+                < noise_train_end
+                <= selection_start
+                < selection_end
+                <= val_start
+                < val_end
+            ):
+                raise ValueError(
+                    "calibration, noise training, selection, and validation "
+                    "windows must be ordered and non-overlapping"
+                )
 
     torch.manual_seed(seed)
 
@@ -1117,6 +1143,11 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
         "hashes": {
             "checkpoint_sha256": checkpoint_hash,
             "corpus_sha256": corpus_hash,
+            "config_sha256": (
+                sha256_file(config_path)
+                if config_path is not None and config_path.is_file()
+                else None
+            ),
             "git_state_captured": "study_start",
             **source_state,
         },
@@ -1140,6 +1171,18 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
             "noise_train_end": (
                 int(finetune_cfg.get("train_end", calib_end))
                 if finetune_cfg is not None
+                else None
+            ),
+            "noise_selection_start": (
+                int(finetune_cfg["selection_start"])
+                if finetune_cfg is not None
+                and "selection_start" in finetune_cfg
+                else None
+            ),
+            "noise_selection_end": (
+                int(finetune_cfg["selection_end"])
+                if finetune_cfg is not None
+                and "selection_end" in finetune_cfg
                 else None
             ),
         },
@@ -1183,7 +1226,7 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
             "interactions are not modeled.",
             "Greedy marginal-KL-per-byte allocation is not globally optimal.",
             "Predicted KL from calibration uses a linear independence sum that "
-            "underestimates interactions; validate calibration_budget_error.",
+            "can misestimate interactions; validate calibration_budget_error.",
             "Cache-noise fine-tuning is a testable intervention, not established "
             "novelty.  Per-head mixed precision is prior art (KVTuner ICML 2025).",
         ],
