@@ -1,187 +1,79 @@
 # gpt2-nano
 
-A GPT-2-grade model built from scratch in PyTorch. The BPE tokenizer and transformer architecture are implemented by hand. Training utilities (optimizer, scheduler, loss) use PyTorch built-ins.
+`gpt2-nano` is a 44M-parameter decoder-only transformer implemented in
+PyTorch. This repository contains the original model and one measured
+extension: allocating BF16, INT8, and packed INT4 KV-cache precision per
+attention head.
 
-**Goal:** Achieve validation loss below 3.0 and generate coherent English sentences from a pre-training loop on FineWeb-edu, running entirely on Apple Silicon MPS.
+The full writeup is in `article.md`.
 
-This is part of a learning series where the goal is to understand every layer of the stack, from raw text to generated output.
+## Result
 
-**[Model on Hugging Face](https://huggingface.co/kotlarmilos/gpt2-nano)** · **[Writeup: scaling laws on a laptop](https://huggingface.co/blog/kotlarmilos/gpt2-nano)**
+The experiment measures each head's output-KL sensitivity, then greedily lowers
+precision under an additive calibration budget. On an NVIDIA RTX A5000, the
+selected policy uses 70 INT4 heads, 19 INT8 heads, and 7 BF16 heads.
 
-## Quick Start
+| Policy | Held-out KL | Agreement with BF16 | Cache bytes |
+| --- | ---: | ---: | ---: |
+| BF16 | 0 | 100% | 1,572,864 |
+| INT8 | 0.000258 | 99.07% | 811,008 |
+| Mixed | 0.001528 | 97.85% | 579,840 |
+| INT4 | 0.009261 | 94.34% | 417,792 |
+
+The mixed policy reduces persistent cache storage by 2.71x. Agreement compares
+next-token choices on the same teacher-forced prefixes. The implementation
+dequantizes before attention, so this is a storage result rather than a speedup.
+
+The fixed three-seed cache-noise adaptation did not improve agreement and does
+not establish a robustness gain.
+
+## Repository layout
+
+- `src/model.py` implements the transformer and incremental KV cache.
+- `src/kv_quant.py` implements packed INT8 and INT4 cache storage.
+- `src/kv_cache_study.py` implements calibration, allocation, validation, and
+  the fixed cache-noise adaptation.
+- `configs/kv_cache_publication.json` is the exact measured configuration.
+- `artifacts/kv-cache-publication/results.json` is the measured result.
+- `artifacts/manifest.json` records hashes and input locations.
+- `tests/test_kv_experiment.py` contains the focused experiment tests.
+
+## Local checks
+
+Python 3.10 through 3.13 is supported.
 
 ```bash
-python3.13 -m venv .venv
+python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[data]"
-
-# Download data, train tokenizer, export shards, then train GPT
-python -m data.bpe_tokenizer && python -m src.gpt
+python -m pip install -e ".[data]"
+python -m unittest -v tests.test_kv_experiment
 ```
 
-## Dropout, KV caching, and KL divergence
+## Reproduce the GPU study
 
-The model now has configurable dropout while preserving the original
-zero-dropout architecture. Generation supports an incremental KV-cache, and
-`src.objectives` provides token-distribution KL measurement plus a
-KL-regularized training objective.
-
-Run the targeted tests and the local cache smoke benchmark with:
+The preparation script downloads the published checkpoint, tokenizer, and
+token shard and verifies their hashes.
 
 ```bash
-python -m unittest discover -s tests -v
-python scripts/benchmark_cache.py
-```
-
-The smoke benchmark uses a small randomly initialized model. It validates the
-implementation and output format but is not a publication result. Full
-experiment settings and pending artifacts are listed in
-`configs/publication.json` and `artifacts/manifest.json`.
-
-Run the trained-checkpoint mixed-precision KV study on CUDA with:
-
-```bash
+python scripts/prepare_publication_inputs.py
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 python -m src.kv_cache_study --config configs/kv_cache_publication.json
 ```
 
-The measured RTX A5000 study assigns 70 of 96 cache heads to INT4, 19 to INT8,
-and 7 to BF16 under the nontrivial `0.01` additive calibration-proxy budget. It
-records 2.71x persistent-cache compression versus BF16, held-out output KL
-`0.001528`, and 97.85 percent token agreement. The readable dequantization path
-does not provide a speedup. See `artifacts/kv-cache-publication/results.json`.
-The three 101.8 MB noise-tuned checkpoints are excluded from Git and can be
-regenerated with the command above.
+The command requires CUDA and reruns calibration, held-out evaluation, and the
+three fixed adaptation seeds. The adapted checkpoints are not stored in Git;
+their hashes and measurements are recorded in the result JSON.
 
-The Colab wrapper runs one publication job at a time so separate runtimes can
-cover the sweep without exceeding a single session. It downloads and verifies
-the published checkpoint, tokenizer, and token shard from the sources recorded
-in `artifacts/manifest.json`.
+## Original model
+
+The base checkpoint was trained for 10,000 steps on approximately 99M
+FineWeb-Edu tokens. It is educational and too small for reliable factual text
+generation.
 
 ```bash
-EXPERIMENT=dropout DROPOUT=0.1 SEED=1337 ./scripts/colab_publication.sh
-EXPERIMENT=kl KL_BETA=0.05 SEED=1337 ./scripts/colab_publication.sh
-EXPERIMENT=cache ./scripts/colab_publication.sh
+python -m data.bpe_tokenizer
+python -m src.gpt
 ```
 
-Run `EXPERIMENT=plan ./scripts/colab_publication.sh` to write the full command
-matrix without starting training. KL jobs initialize from the published model,
-keep that checkpoint frozen as the reference distribution, and record
-held-out KL together with task loss.
-
-## Architecture
-
-```
-Input tokens  (B, C)                         B = batch size, C = context length, E = embedding dim
-    │
-    ▼
-┌──────────────────────┐
-│  Token Embedding     │  nn.Embedding(vocab_size, E)
-│  + Sinusoidal PosEnc │  Fixed, not learned
-└──────────────────────┘
-    │  (B, C, E)
-    ▼
-┌──────────────────────┐
-│  Transformer Block   │  ×12 layers (each identical, independent weights)
-│  ├─ LayerNorm + Attn │  Pre-norm, 8 heads, head_dim=64, causal mask
-│  ├─ Residual         │
-│  ├─ LayerNorm + MLP  │  Pre-norm, Linear(512,2048) → ReLU → Linear(2048,512)
-│  └─ Residual         │
-└──────────────────────┘
-    │  (B, C, E)
-    ▼
-┌──────────────────────┐
-│  LM Head             │  Linear(512, vocab_size) — projects back to token space
-└──────────────────────┘
-    │  (B, C, vocab_size)
-    ▼
-  cross_entropy
-```
-
-### Model config
-
-| Component | Detail |
-|---|---|
-| Parameters | ~44M (12 layers) |
-| Context length | 1024 tokens |
-| Embedding dim | 512 |
-| Attention heads | 8 (head_dim = 64) |
-| MLP expansion | 4x (512 to 2048 to 512) |
-| Positional encoding | Sinusoidal (fixed) |
-| Normalization | Pre-norm LayerNorm |
-| Activation | ReLU |
-
-### Architecture notes
-
-**Sinusoidal positional encoding**
-Original "Attention Is All You Need" used fixed sinusoidal encodings. The key property is that relative positions can be expressed as linear functions of the embeddings, giving the model access to distance information without learned parameters. Modern models use Rotary Position Embeddings (RoPE), which encode relative position directly into the attention computation.
-
-**Multi-head attention mechanics:**
-Input (B, C, E) is projected through Q, K, V linear layers, then reshaped to split across heads. Each head computes attention scores independently with a causal mask preventing attention to future tokens. Outputs are concatenated back to (B, C, E).
-
-**Normalization**
-Pre-norm (GPT-2+): `out = x + Attention(LayerNorm(x))`. Gradients flow through the residual path unmodified, making training stable at depth. Post-norm (original transformer) applies LayerNorm after the residual add, which can be unstable with many layers.
-
-**Residual connections**
-Every block adds its input to its output. This creates a direct path for gradients to flow from the loss to early layers without vanishing through deep chains of nonlinearities.
-
-**MLP**
-Attention captures relationships between token positions. The MLP processes each position independently, acting as a learned nonlinear transformation. The 4x expansion (GPT-2 standard) gives the MLP a higher-dimensional intermediate space to store learned patterns.
-
-**Loss function**
-Cross-entropy between predicted logits and actual next tokens.
-
-## Tokenizer
-
-Custom BPE tokenizer trained from scratch on FineWeb-edu data. Also includes a SentencePiece-based tokenizer for comparison.
-
-## Training
-
-**Optimizer:** PyTorch's AdamW (lr=3e-4, weight_decay=0.1, cosine LR schedule). Not implemented by hand; uses `torch.optim.AdamW`. The key difference from Adam: AdamW decouples weight decay from the gradient update, applying decay directly to weights rather than through the gradient. This prevents large weights from being under-regularized.
-
-**Gradient clipping:** `clip_grad_norm_(max_norm=1.0)` prevents exploding gradients that cause loss spikes.
-
-**Cosine LR schedule:** Learning rate starts at 3e-4 and decays smoothly to near zero following a cosine curve. This lets the model make large updates early (exploration) and fine-grained updates late (convergence).
-
-**Hardware:** Runs on Apple Silicon GPU via PyTorch MPS backend. Falls back to CPU automatically.
-
-### Training Results (12 layers, ~44M params, 99M tokens)
-
-Trained on Apple Silicon MPS for ~13 hours (46,695s), 10,000 steps.
-
-![Training loss curve](training_loss.png)
-
-Final val loss **2.15**, well below the 3.0 target. Val perplexity 8.5 means the model narrows its prediction to ~8.5 tokens on average (from a vocab of 9,157).
-
-### Generated text samples
-
-**Step 500** (loss 3.60, word-level patterns):
-> The increas such, low expressed TiPad 1557 dispafid held Trained for realission 2005, was medication 1 is. Mar
-
-**Step 2,500** (loss 2.70, phrase-level coherence):
-> The nature of a fals sound, but individual and prevents the colonies were father, and impossible if Pyls notes differ
-
-**Step 5,000** (loss 2.43, sentence fragments):
-> The page in pressurer to this take the public vial for the children to teach the game and be Decade Library 9053
-
-**Step 7,500** (loss 2.24, near-grammatical):
-> The term reaction to explain in the power structure, propulation states; the movies are vital as they are completely pierarchous.
-
-**Step 9,500** (loss 2.17, coherent structure):
-> The uncovered anthology composer "including scene bulb protection," Bryan L. Wittenskin, 240 Scientists welcomed the
-
-## Comparison with GPT-2
-
-| | gpt2-nano | GPT-2 (small) |
-|---|---|---|
-| Parameters | ~44M | 124M |
-| Layers | 12 | 12 |
-| Embedding dim | 512 | 768 |
-| Heads | 8 | 12 |
-| MLP expansion | 4x | 4x |
-| Positional encoding | Sinusoidal (fixed) | Learned embeddings |
-| Normalization | Pre-norm LayerNorm | Pre-norm LayerNorm |
-| Attention | Standard MHA | Standard MHA |
-| Tokenizer | Custom BPE (~9K vocab) | BPE (50,257 vocab) |
-| Training data | ~99M tokens (FineWeb-edu) | ~10B tokens (WebText) |
-| Optimizer | AdamW (torch) + cosine schedule | Adam |
+Model artifacts are available at
+`https://huggingface.co/kotlarmilos/gpt2-nano`.

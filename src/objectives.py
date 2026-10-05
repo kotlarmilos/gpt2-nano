@@ -28,19 +28,3 @@ def categorical_kl(
     if reduction == "batchmean":
         return per_distribution.sum() / model_logits.size(0)
     raise ValueError(f"unsupported reduction: {reduction}")
-
-
-def kl_regularized_loss(
-    model_logits: Tensor,
-    targets: Tensor,
-    reference_logits: Tensor,
-    beta: float,
-) -> tuple[Tensor, Tensor, Tensor]:
-    if beta < 0:
-        raise ValueError("beta cannot be negative")
-    task_loss = F.cross_entropy(
-        model_logits.float().reshape(-1, model_logits.size(-1)),
-        targets.reshape(-1),
-    )
-    kl_loss = categorical_kl(model_logits, reference_logits)
-    return task_loss + beta * kl_loss, task_loss, kl_loss

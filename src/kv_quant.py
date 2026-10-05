@@ -16,7 +16,8 @@ from src.model import (
     sinusoidal_positions,
 )
 
-# Supported bit widths for K/V cache quantization.
+# Policy values for K/V cache storage. The value 16 keeps the model dtype,
+# which is BF16 in the publication run and FP32 in the CPU smoke run.
 VALID_BITS: frozenset[int] = frozenset({16, 8, 4})
 
 _INT8_MAX: int = 127
@@ -144,17 +145,17 @@ class QuantizedHeadTensor:
     """Quantized storage for one attention head's K or V activations.
 
     payload shape:
-      16-bit -> (batch, seq_len, head_dim),          dtype = model float dtype
+      model dtype -> (batch, seq_len, head_dim),     policy value = 16
        8-bit -> (batch, seq_len, head_dim),          dtype = int8
        4-bit -> (batch, seq_len, ceil(head_dim/2)),  dtype = uint8
 
-    scales shape (when present): (batch, seq_len), dtype = float16
+    Scales are present only for INT8 and INT4.
     """
 
     bits: int
     head_dim: int
     payload: Tensor
-    scales: Tensor | None  # None for 16-bit
+    scales: Tensor | None
 
     def dequantize(self, target_dtype: torch.dtype | None = None) -> Tensor:
         """Return float tensor of shape (batch, seq_len, head_dim)."""
@@ -173,7 +174,7 @@ class QuantizedHeadTensor:
         raise ValueError(f"unsupported bits {self.bits}")
 
     def scale_nbytes(self) -> int:
-        """Exact bytes for scale storage; 0 for 16-bit heads."""
+        """Exact bytes for scale storage; zero for model-dtype heads."""
         if self.scales is None:
             return 0
         return self.scales.numel() * self.scales.element_size()
@@ -208,8 +209,8 @@ class QuantizedHeadTensor:
     def from_float(x: Tensor, bits: int) -> QuantizedHeadTensor:
         """Quantize a float tensor of shape (batch, seq_len, head_dim).
 
-        Note: 16-bit stores a reference to x, not a copy.  The caller is
-        responsible for not mutating x afterwards.
+        The policy value 16 stores a reference to x in the model dtype rather
+        than quantizing it. The caller must not mutate x afterwards.
         """
         _validate_bits(bits)
         head_dim = x.size(-1)
@@ -316,7 +317,7 @@ QuantizedKVCache = tuple[QuantizedLayerKV, ...]
 
 @dataclass(frozen=True)
 class CachePolicy:
-    """Per-layer, per-head precision policy.  bits_per_layer[l][h] in {16, 8, 4}."""
+    """Per-head cache policy using model dtype, INT8, or packed INT4."""
 
     bits_per_layer: tuple[tuple[int, ...], ...]
 
@@ -335,7 +336,7 @@ class CachePolicy:
 
     @staticmethod
     def all_sixteen(num_layers: int, num_heads: int) -> CachePolicy:
-        """Return a policy with all heads at 16-bit precision."""
+        """Return a policy with every head retained in the model dtype."""
         return CachePolicy(
             bits_per_layer=tuple(
                 tuple(16 for _ in range(num_heads)) for _ in range(num_layers)
@@ -409,12 +410,12 @@ class QuantizedCacheGPT(nn.Module):
 
     The wrapped GPT model is never modified.  Dequantization happens before
     passing past_key_values to the underlying model; requantization happens
-    after receiving the returned cache.  This ensures the wrapped GPT always
-    sees full-precision K and V tensors.
+    after receiving the returned cache. The wrapped GPT therefore consumes
+    K and V in its model dtype.
 
     Persistent cache bytes differ from transient dequantization peak memory.
-    The peak memory during a forward step includes full-precision K, V
-    temporarily in flight even for low-bit heads.
+    A forward step temporarily reconstructs model-dtype K and V even for
+    low-bit heads.
     """
 
     def __init__(self, gpt: GPT, policy: CachePolicy) -> None:
@@ -479,7 +480,7 @@ class QuantizedCacheGPT(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# NoisyBlock and NoisyKVGPT for cache-noise robustness fine-tuning
+# Cache-noise adaptation used by the completed three-seed intervention
 # ---------------------------------------------------------------------------
 
 
@@ -581,7 +582,7 @@ class NoisyBlock(Block):
 
 
 class NoisyKVGPT(nn.Module):
-    """Standalone GPT with NoisyBlock layers for cache-noise robustness training.
+    """GPT variant used for the cache-noise adaptation experiment.
 
     The state dict is parameter-key-compatible with GPT checkpoints: all
     Block parameter names are preserved under blocks.N.*, and the top-level

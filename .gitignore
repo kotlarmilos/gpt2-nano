@@ -213,9 +213,5 @@ data/bpe-*
 checkpoints/
 artifacts/*.json
 !artifacts/manifest.json
-!artifacts/cache-publication-local-m1.json
-!artifacts/dropout-smoke/
 !artifacts/kv-cache-publication/
 artifacts/noise_tuned/
-# Internal release checklist, not published
-SIGNOFF.md

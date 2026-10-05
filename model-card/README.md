@@ -1,67 +1,45 @@
 ---
 library_name: pytorch
-license: mit
 language:
   - en
 tags:
   - causal-lm
   - from-scratch
-  - apple-silicon
   - kv-cache
+  - quantization
 ---
 
 # gpt2-nano
 
-This is a 44M parameter decoder-only transformer implemented from scratch in
-PyTorch. The expanded release adds configurable dropout, incremental decoding
-with a KV-cache, and tools for measuring and regularizing token-distribution
-shift with KL divergence.
+This is a 44M-parameter decoder-only transformer implemented in PyTorch. The
+published checkpoint predates the mixed-precision extension.
 
-The published checkpoint predates these experiments. A trained-checkpoint
-KV-cache benchmark is measured locally on Apple M1. Dropout and KL publication
-runs remain pending, as recorded in the artifact manifest.
+## Measured extension
 
-The RTX A5000 extension allocates BF16, INT8, and INT4 cache precision per head
-under an additive single-head KL calibration proxy. The nontrivial mixed policy
-records 2.71x persistent-cache compression versus BF16, held-out output KL
-`0.001528`, and 97.85 percent token agreement. Its three-seed cache-noise
-adaptation is a null result rather than a robustness claim. See
-`artifacts/kv-cache-publication/results.json`.
+The extension assigns BF16, INT8, or packed INT4 KV-cache storage to each of
+the model's 96 attention heads. A greedy allocator uses isolated single-head
+output-KL measurements as a calibration proxy.
+
+On an RTX A5000, the selected policy uses 70 INT4 heads, 19 INT8 heads, and
+7 BF16 heads. It stores 579,840 bytes for a batch-one, 64-token cache, compared
+with 1,572,864 bytes for BF16. Held-out teacher-forced output KL is `0.001528`,
+and next-token agreement is 97.85%.
+
+The fixed cache-noise adaptation does not establish a robustness gain.
 
 ## Intended use
 
-The model and code are educational. They are intended for studying transformer
-training and inference on modest hardware, not for production text generation.
+The model and code are intended for education and controlled cache experiments.
+They are not intended for production text generation or factual question
+answering.
 
-## Base configuration
+## Limits
 
-| Setting | Value |
-|---|---:|
-| Parameters | approximately 44M |
-| Layers | 12 |
-| Hidden size | 512 |
-| Attention heads | 8 |
-| Context | 1,024 |
-| Vocabulary | 9,157 custom BPE tokens |
-| Training data | FineWeb-edu subset |
+- Agreement is measured on shared teacher-forced prefixes, not generated text.
+- The additive calibration score is not a bound on joint held-out KL.
+- Persistent cache bytes exclude model weights and temporary dequantized tensors.
+- The implementation dequantizes before attention and does not provide a speedup.
+- The study uses one checkpoint, one held-out window, and one GPU.
 
-## Local extension result
-
-A development-scale KV-cache numerical equivalence run uses
-`checkpoints/final.pt`, three prompts, a 128-token greedy horizon, and Apple MPS.
-It records no token flips for `float32` or `bfloat16`. The maximum absolute logit
-deviation is `2.09808349609375e-05` for `float32` and `0.125` for `bfloat16`.
-The maximum relative logit deviation is `1.32924469653517e-06` for `float32` and
-`0.008438818156719208` for `bfloat16`. This is not a publication-scale result.
-The artifact path is `artifacts/kv-equivalence-dev-local/results.json`, with
-SHA-256 `bc47aba423ba538a698ca0c040b6a21fef7e9cada13f662ffe9cb08b308cd54a`
-recorded in `artifacts/manifest.json`.
-
-## Limitations
-
-The original run used one seed and approximately 99M tokens. The model is too
-small and under-trained for reliable factual generation. Cache benchmarks on a
-random smoke model validate the implementation but are not evidence of
-publication-scale speedups. The mixed-precision runner reconstructs full-
-precision tensors before attention, so its timing does not represent a fused
-quantized inference kernel.
+The measured evidence is in
+`artifacts/kv-cache-publication/results.json`.

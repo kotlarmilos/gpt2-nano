@@ -2,49 +2,9 @@
   "schema_version": 1,
   "artifacts": [
     {
-      "path": "training_loss.png",
-      "status": "existing-published",
-      "description": "Original 10,000-step training loss figure"
-    },
-    {
-      "path": "artifacts/cache-smoke.json",
-      "status": "measured-local-smoke",
-      "sha256": "d1d343d7813886b1908cb2658dca60a0b03f681349a9aa3d1be9eeae31f2506a",
-      "description": "Random-initialization smoke benchmark for cache correctness and timing"
-    },
-    {
-      "path": "artifacts/dropout-publication.json",
-      "status": "pending-publication-run",
-      "description": "Three-seed dropout sweep on the full training configuration"
-    },
-    {
-      "path": "artifacts/dropout-smoke/metrics.json",
-      "status": "measured-local-smoke",
-      "sha256": "430a953b6d9dfffe99af488211684a11000d875d7bfee42e60e9d57c757b7c61",
-      "description": "Ten-step MPS integration run on one published FineWeb-edu token shard"
-    },
-    {
-      "path": "checkpoints/dropout-smoke/final.pt",
-      "status": "measured-local-smoke",
-      "sha256": "a82297d58b9ce334c4b98d92f5a08d4a0946944b797cb0a46b516f174ffd739f",
-      "description": "Checkpoint from the ten-step dropout integration run"
-    },
-    {
-      "path": "artifacts/cache-publication-local-m1.json",
-      "status": "measured",
-      "description": "Trained-checkpoint cache benchmark on Apple M1 across prompt lengths",
-      "sha256": "81e3129df2fa09c9204e6409c863d39353347baf27f6e74c617da30c79ae04a7"
-    },
-    {
-      "path": "artifacts/kv-equivalence-dev-local/results.json",
-      "status": "measured-local-development",
-      "description": "Development-scale KV-cache numerical equivalence run across float32 and bfloat16",
-      "sha256": "bc47aba423ba538a698ca0c040b6a21fef7e9cada13f662ffe9cb08b308cd54a"
-    },
-    {
       "path": "artifacts/kv-cache-publication/results.json",
       "status": "publication-hardware-measured",
-      "description": "Deterministic per-head mixed-precision KV-cache study on an NVIDIA RTX A5000",
+      "description": "RTX A5000 study of per-head BF16, INT8, and packed INT4 allocation, held-out teacher-forced output shift, and a negative three-seed cache-noise adaptation",
       "sha256": "063dade7c10498be8aa7afcb0363eb69ba55dfec2903a58268eacbd01a707f61",
       "config": "configs/kv_cache_publication.json",
       "config_sha256": "156501a727413a913c2c0ed9e36e6105c90f8df3e33643b56e9b1bc7b5d8106f",
@@ -54,17 +14,7 @@
       "corpus_source": "https://huggingface.co/kotlarmilos/gpt2-nano/resolve/ee547b4112bce2d2557dd0975038035bab6c86eb/bpe-shards/train_000000.bin",
       "postprocessing": "Copied byte-for-byte from the RunPod output; no JSON fields changed after measurement.",
       "run_log_sha256": "812a31589e165ae41af38579b45f43b9d38d4ae4abdf57a3724739753d8095f6",
-      "runner_hashes_sha256": "d006e0c07815a10cf20d6f10655416d77365ed3fe2e69cbea6560e55a714929a",
-      "untracked_noise_checkpoints": {
-        "artifacts/noise_tuned/noise_tuned_seed1337.pt": "f843633b1157c01c68118a96cf6442f9f57bfc341e5ff9dc1df30c8eeb22bc3c",
-        "artifacts/noise_tuned/noise_tuned_seed2026.pt": "5ac9ac38f7f02506cd30848c8f98304103e1c4c6d4d50b38ff764c8be8d91c7c",
-        "artifacts/noise_tuned/noise_tuned_seed9001.pt": "006fbb7e2bc47ea389f0d2f05059dd1d4a1d9c520f5672417d39ecaed471a9e8"
-      }
-    },
-    {
-      "path": "artifacts/kl-publication.json",
-      "status": "pending-publication-run",
-      "description": "Held-out token-level KL sweep for adapted checkpoints"
+      "runner_hashes_sha256": "d006e0c07815a10cf20d6f10655416d77365ed3fe2e69cbea6560e55a714929a"
     },
     {
       "path": "checkpoints/final.pt",
@@ -89,12 +39,6 @@
       "status": "restored-from-published-model",
       "sha256": "f08410ea036cc56b78ffc3f6edbf94f5a1d469aeb7c708bb56e4ce544623a69e",
       "source": "https://huggingface.co/kotlarmilos/gpt2-nano/resolve/ee547b4112bce2d2557dd0975038035bab6c86eb/bpe-shards/train_000000.bin"
-    },
-    {
-      "path": "space/gpt2_nano-0.2.0-py3-none-any.whl",
-      "status": "release-candidate",
-      "sha256": "978c5b7ec1bc740287963ed93527f04aaa3e7725609ceb271792f83089989489",
-      "description": "Standalone Space runtime wheel built from this working tree"
     }
   ]
 }

@@ -14,13 +14,9 @@ data = [
   "requests>=2.31",
   "sentencepiece>=0.2",
 ]
-demo = [
-  "gradio>=5,<6",
-]
 
 [project.scripts]
 kv-cache-study = "src.kv_cache_study:main"
-kv-equivalence = "src.kv_equivalence:main"
 
 [tool.setuptools.packages.find]
 include = ["src*", "data*"]

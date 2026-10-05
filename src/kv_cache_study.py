@@ -1,23 +1,19 @@
-"""KV-cache quantization sensitivity, policy allocation, and validation study.
+"""Mixed-precision KV-cache calibration, allocation, and validation study.
 
 This module implements:
   1. Sensitivity calibration: per-(layer, head) KL measured with one head
-     quantized at a time, all others at 16-bit.
+     quantized at a time, all others retained in the model dtype.
   2. Greedy marginal-KL-per-byte policy allocation under explicit KL budgets.
-     The greedy is documented as greedy (not globally optimal).
   3. Validation: held-out CE, KL percentiles, token agreement, timing, memory.
-  4. Cache-noise fine-tuning: inject quantization-matched noise into K/V while
-     preserving full-precision weights; optimize CE + KL vs. frozen teacher.
+  4. A fixed three-seed cache-noise adaptation that did not establish a
+     robustness gain.
 
-Prior art note: per-layer and per-head mixed-precision KV quantization using
-sensitivity calibration is established in KVTuner (ICML 2025, arXiv:2502.04420).
-The narrow extension here is output KL divergence as the calibration signal,
-an explicit global KL budget, and cache-noise robustness fine-tuning as a
-testable intervention.  These are framed as experimental interventions, not
-established novelties.
+Per-head mixed-precision KV quantization is prior art. This study measures a
+small model using output KL as an additive calibration proxy and reports the
+joint held-out result separately. The proxy is not a bound.
 
 CLI usage:
-  python -m src.kv_cache_study --config configs/kv_cache_smoke.json
+  python -m src.kv_cache_study --config configs/kv_cache_publication.json
 """
 
 from __future__ import annotations
@@ -237,10 +233,11 @@ def teacher_forced_logits(
     sequences: list[list[int]],
     device: torch.device,
 ) -> list[Tensor]:
-    """Full-sequence forward pass under teacher forcing (no KV cache).
+    """Full-sequence teacher-forced helper without a KV cache.
 
     Returns logits[i] of shape (seq_len, vocab_size) for each sequence i.
-    This is the reference baseline (no quantization error).
+    The publication study instead uses the model-dtype incremental path as its
+    reference so cached-versus-uncached arithmetic is not part of the result.
     """
     model.eval()
     results = []
@@ -287,11 +284,11 @@ def compute_sensitivity_matrices(
     sequences: list[list[int]],
     device: torch.device,
 ) -> dict[str, Any]:
-    """Compute 12x8 (num_layers x num_heads) KL sensitivity matrices.
+    """Compute per-head INT8 and INT4 output-KL sensitivity matrices.
 
     For each (layer, head) pair independently, quantize only that head to
-    INT8 or INT4 (all others at 16-bit) and measure mean output KL vs.
-    the full-precision baseline.
+    INT8 or INT4 and retain all other heads in the model dtype. Measure mean
+    output KL against the all-model-dtype incremental baseline.
 
     Sensitivity assumes per-head independence.  Cross-head interactions are
     not modeled.  This is a greedy approximation baseline.
@@ -497,7 +494,7 @@ def build_named_policies(
     head_dim: int,
     kl_budgets: list[float],
     model_dtype_bytes: int = 4,
-    full_precision_label: str | None = None,
+    model_dtype_label: str | None = None,
     seq_len: int = 1,
 ) -> list[dict[str, Any]]:
     """Build all named policies: uniform INT8, uniform INT4, sensitivity budgets."""
@@ -543,17 +540,17 @@ def build_named_policies(
         }
     )
 
-    if full_precision_label is None:
-        full_precision_label = (
+    if model_dtype_label is None:
+        model_dtype_label = (
             "all_fp32" if model_dtype_bytes == 4 else "all_16bit"
         )
 
     # The policy value 16 means that a head stays in the model dtype.
-    p_fp = CachePolicy.all_sixteen(num_layers, num_heads)
+    p_model_dtype = CachePolicy.all_sixteen(num_layers, num_heads)
     policies.append(
         {
-            "label": full_precision_label,
-            "policy": p_fp,
+            "label": model_dtype_label,
+            "policy": p_model_dtype,
             "predicted_kl": 0.0,
             "avg_payload_bits": float(model_dtype_bytes * 8),
             "steps": [],
@@ -713,7 +710,7 @@ def evaluate_policy(
         head_dim=head_dim,
         model_dtype_bytes=4,
     )
-    full_precision_bytes = CachePolicy.all_sixteen(
+    model_dtype_cache_bytes = CachePolicy.all_sixteen(
         num_layers, num_heads
     ).exact_cache_bytes(
         batch=1,
@@ -727,7 +724,7 @@ def evaluate_policy(
         else float("inf")
     )
     compression_factor = (
-        full_precision_bytes["total_bytes"] / cache_bytes["total_bytes"]
+        model_dtype_cache_bytes["total_bytes"] / cache_bytes["total_bytes"]
         if cache_bytes["total_bytes"] > 0
         else float("inf")
     )
@@ -772,7 +769,10 @@ def evaluate_policy(
         "cache_total_bytes": cache_bytes["total_bytes"],
         "fp32_cache_bytes": fp32_bytes["total_bytes"],
         "compression_ratio_vs_fp32": compression_ratio,
-        "full_precision_cache_bytes": full_precision_bytes["total_bytes"],
+        "model_dtype_cache_bytes": model_dtype_cache_bytes["total_bytes"],
+        "compression_factor_vs_model_dtype": compression_factor,
+        # Retained for compatibility with the recorded v1 artifact.
+        "full_precision_cache_bytes": model_dtype_cache_bytes["total_bytes"],
         "compression_factor_vs_full_precision": compression_factor,
         "avg_payload_bits": average_storage_bits(policy, dtype_bytes),
         **timing,
@@ -781,39 +781,41 @@ def evaluate_policy(
 
 
 # ---------------------------------------------------------------------------
-# Cache-noise fine-tuning
+# Cache-noise adaptation
 # ---------------------------------------------------------------------------
 
 
-def run_noise_finetune(
+def run_noise_adaptation(
     checkpoint_path: Path,
     train_sequences: list[list[int]],
     val_sequences: list[list[int]],
     baseline_logits_list: list[Tensor],
     policy: CachePolicy,
-    finetune_cfg: dict[str, Any],
+    adaptation_cfg: dict[str, Any],
     device: torch.device,
     dtype: torch.dtype,
     output_dir: Path,
 ) -> list[dict[str, Any]]:
-    """Run cache-noise fine-tuning for multiple seeds.
+    """Run the fixed cache-noise adaptation for multiple seeds.
 
     For each seed, creates a NoisyKVGPT initialized from the checkpoint and
     trains with next-token CE + KL to the frozen teacher.  The teacher
     receives no gradients.
 
-    Saves noise-trained checkpoints to output_dir (not committed).
+    Saves adapted checkpoints to output_dir. They are not committed.
 
     Returns per-seed results (curves, checkpoint hashes, validation metrics).
     """
-    seeds: list[int] = list(finetune_cfg.get("seeds", [1337]))
-    num_steps: int = int(finetune_cfg.get("num_steps", 100))
-    kl_beta: float = float(finetune_cfg.get("kl_beta", 0.1))
-    lr: float = float(finetune_cfg.get("lr", 1e-4))
-    noise_bits: int = int(finetune_cfg.get("noise_bits", 4))
-    noise_type: str = str(finetune_cfg.get("noise_type", "uniform"))
-    context_len: int = int(finetune_cfg.get("context_len", len(train_sequences[0])))
-    batch_size: int = int(finetune_cfg.get("batch_size", 1))
+    seeds: list[int] = list(adaptation_cfg.get("seeds", [1337]))
+    num_steps: int = int(adaptation_cfg.get("num_steps", 100))
+    kl_beta: float = float(adaptation_cfg.get("kl_beta", 0.1))
+    lr: float = float(adaptation_cfg.get("lr", 1e-4))
+    noise_bits: int = int(adaptation_cfg.get("noise_bits", 4))
+    noise_type: str = str(adaptation_cfg.get("noise_type", "uniform"))
+    context_len: int = int(
+        adaptation_cfg.get("context_len", len(train_sequences[0]))
+    )
+    batch_size: int = int(adaptation_cfg.get("batch_size", 1))
     if context_len < 2 or context_len > len(train_sequences[0]):
         raise ValueError(
             "noise_finetune.context_len must be between 2 and the sampled "
@@ -914,9 +916,9 @@ def run_noise_finetune(
             val_sequences,
             baseline_logits_list,
             device,
-            policy_label="noise_tuned_quantized",
+            policy_label="noise_adapted_quantized",
         )
-        full_precision_validation = evaluate_policy(
+        model_dtype_validation = evaluate_policy(
             eval_gpt,
             CachePolicy.all_sixteen(
                 len(eval_gpt.blocks), eval_gpt.config.num_heads
@@ -924,7 +926,7 @@ def run_noise_finetune(
             val_sequences,
             baseline_logits_list,
             device,
-            policy_label="noise_tuned_full_precision",
+            policy_label="noise_adapted_model_dtype",
         )
 
         all_seed_results.append(
@@ -934,7 +936,9 @@ def run_noise_finetune(
                 "checkpoint_sha256": ckpt_hash,
                 "train_curves": curves,
                 "validation": quantized_validation,
-                "full_precision_validation": full_precision_validation,
+                "model_dtype_validation": model_dtype_validation,
+                # Retained for compatibility with the recorded v1 artifact.
+                "full_precision_validation": model_dtype_validation,
             }
         )
 
@@ -972,31 +976,37 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
 
     kl_budgets: list[float] = [float(b) for b in cfg.get("kl_budgets", [0.01, 0.05, 0.1])]
     time_sequences_n: int = int(cfg.get("time_sequences", 2))
-    finetune_cfg: dict[str, Any] | None = cfg.get("noise_finetune")
-    if finetune_cfg is not None:
-        has_selection_start = "selection_start" in finetune_cfg
-        has_selection_end = "selection_end" in finetune_cfg
-        if has_selection_start != has_selection_end:
+    # The v1 config uses `noise_finetune`; this is the fixed cache-noise
+    # adaptation, and its `selection_*` window was reserved but unused.
+    adaptation_cfg: dict[str, Any] | None = cfg.get("noise_finetune")
+    if adaptation_cfg is not None:
+        has_reserved_start = "selection_start" in adaptation_cfg
+        has_reserved_end = "selection_end" in adaptation_cfg
+        if has_reserved_start != has_reserved_end:
             raise ValueError(
                 "noise_finetune selection_start and selection_end must be set together"
             )
-        if has_selection_start:
-            noise_train_start = int(finetune_cfg.get("train_start", calib_start))
-            noise_train_end = int(finetune_cfg.get("train_end", calib_end))
-            selection_start = int(finetune_cfg["selection_start"])
-            selection_end = int(finetune_cfg["selection_end"])
+        if has_reserved_start:
+            noise_train_start = int(
+                adaptation_cfg.get("train_start", calib_start)
+            )
+            noise_train_end = int(
+                adaptation_cfg.get("train_end", calib_end)
+            )
+            reserved_start = int(adaptation_cfg["selection_start"])
+            reserved_end = int(adaptation_cfg["selection_end"])
             if not (
                 calib_start
                 < calib_end
                 <= noise_train_start
                 < noise_train_end
-                <= selection_start
-                < selection_end
+                <= reserved_start
+                < reserved_end
                 <= val_start
                 < val_end
             ):
                 raise ValueError(
-                    "calibration, noise training, selection, and validation "
+                    "calibration, noise training, reserved, and validation "
                     "windows must be ordered and non-overlapping"
                 )
 
@@ -1018,7 +1028,7 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
     num_heads = model.config.num_heads
     head_dim = model.config.embedding_dim // num_heads
     model_dtype_bytes = next(model.parameters()).element_size()
-    full_precision_label = {
+    model_dtype_label = {
         "float32": "all_fp32",
         "float16": "all_fp16",
         "bfloat16": "all_bf16",
@@ -1037,22 +1047,22 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
         corpus_hash = sha256_file(corpus_path)
         calib_seqs = token_windows(tokens, calib_start, calib_end, seq_len)
         val_seqs = token_windows(tokens, val_start, val_end, seq_len)
-        if finetune_cfg is not None:
+        if adaptation_cfg is not None:
             noise_train_start = int(
-                finetune_cfg.get("train_start", calib_start)
+                adaptation_cfg.get("train_start", calib_start)
             )
             noise_train_end = int(
-                finetune_cfg.get("train_end", calib_end)
+                adaptation_cfg.get("train_end", calib_end)
             )
             noise_train_seqs = token_windows(
                 tokens,
                 noise_train_start,
                 noise_train_end,
-                int(finetune_cfg.get("context_len", seq_len)),
+                int(adaptation_cfg.get("context_len", seq_len)),
             )
             if not noise_train_seqs:
                 raise ValueError(
-                    "noise fine-tuning window produced no sequences"
+                    "cache-noise adaptation window produced no sequences"
                 )
     else:
         rng = np.random.default_rng(seed)
@@ -1093,7 +1103,7 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
         head_dim=head_dim,
         kl_budgets=kl_budgets,
         model_dtype_bytes=model_dtype_bytes,
-        full_precision_label=full_precision_label,
+        model_dtype_label=model_dtype_label,
         seq_len=seq_len,
     )
 
@@ -1119,28 +1129,28 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
             )
         validation_results.append(metrics)
 
-    # --- Noise fine-tuning (optional) ---
-    finetune_results: list[dict[str, Any]] | None = None
-    if finetune_cfg is not None and checkpoint_path is not None:
+    # --- Cache-noise adaptation (optional) ---
+    adaptation_results: list[dict[str, Any]] | None = None
+    if adaptation_cfg is not None and checkpoint_path is not None:
         noise_output_dir = Path(
             str(cfg.get("noise_output_dir", "artifacts/noise_tuned"))
         )
-        # Select the first greedy policy for noise tuning evaluation
+        # Evaluate the fixed adaptation with the first greedy policy.
         greedy_policies = [
             p for p in named_policies if p["label"].startswith("greedy_")
         ]
-        finetune_policy = (
+        adaptation_policy = (
             greedy_policies[0]["policy"]
             if greedy_policies
             else CachePolicy.all_sixteen(num_layers, num_heads)
         )
-        finetune_results = run_noise_finetune(
+        adaptation_results = run_noise_adaptation(
             checkpoint_path=checkpoint_path,
             train_sequences=noise_train_seqs or calib_seqs,
             val_sequences=val_seqs,
             baseline_logits_list=baseline_val,
-            policy=finetune_policy,
-            finetune_cfg=finetune_cfg,
+            policy=adaptation_policy,
+            adaptation_cfg=adaptation_cfg,
             device=device,
             dtype=dtype,
             output_dir=noise_output_dir,
@@ -1182,25 +1192,25 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
             "num_val_sequences": len(val_seqs),
             "overlap": False,
             "noise_train_start": (
-                int(finetune_cfg.get("train_start", calib_start))
-                if finetune_cfg is not None
+                int(adaptation_cfg.get("train_start", calib_start))
+                if adaptation_cfg is not None
                 else None
             ),
             "noise_train_end": (
-                int(finetune_cfg.get("train_end", calib_end))
-                if finetune_cfg is not None
+                int(adaptation_cfg.get("train_end", calib_end))
+                if adaptation_cfg is not None
                 else None
             ),
             "noise_selection_start": (
-                int(finetune_cfg["selection_start"])
-                if finetune_cfg is not None
-                and "selection_start" in finetune_cfg
+                int(adaptation_cfg["selection_start"])
+                if adaptation_cfg is not None
+                and "selection_start" in adaptation_cfg
                 else None
             ),
             "noise_selection_end": (
-                int(finetune_cfg["selection_end"])
-                if finetune_cfg is not None
-                and "selection_end" in finetune_cfg
+                int(adaptation_cfg["selection_end"])
+                if adaptation_cfg is not None
+                and "selection_end" in adaptation_cfg
                 else None
             ),
         },
@@ -1232,26 +1242,27 @@ def run_study(cfg: dict[str, Any], *, config_path: Path | None = None) -> dict[s
             "window": {"start": val_start, "end": val_end, "seq_len": seq_len},
             "results": validation_results,
         },
+        # Retained for compatibility with the recorded v1 artifact.
         "noise_fine_tuning": (
             {
-                "config": finetune_cfg,
-                "seeds": finetune_results,
+                "config": adaptation_cfg,
+                "seeds": adaptation_results,
             }
-            if finetune_results is not None
+            if adaptation_results is not None
             else None
         ),
         "caveats": [
             "Persistent cache bytes differ from transient dequantization peak "
-            "memory: during a decode step, full-precision K and V are briefly "
+            "memory: during a decode step, model-dtype K and V are briefly "
             "reconstructed in memory even for low-bit heads.",
-            "Sensitivity computation assumes per-head independence.  Cross-head "
+            "Sensitivity computation assumes per-head independence. Cross-head "
             "interactions are not modeled.",
             "Greedy marginal-KL-per-byte allocation is not globally optimal.",
             "The KL budget applies to an additive single-head calibration proxy, "
             "not a bound on held-out joint output KL. Cross-head interactions can "
             "make the proxy differ from measured KL.",
-            "Cache-noise fine-tuning is a testable intervention, not established "
-            "novelty.  Per-head mixed precision is prior art (KVTuner ICML 2025).",
+            "The fixed three-seed cache-noise adaptation did not establish a "
+            "robustness gain. Per-head mixed precision is prior art.",
         ],
     }
 
@@ -1302,7 +1313,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("configs/kv_cache_smoke.json"),
+        required=True,
         help="Path to JSON config file",
     )
     parser.add_argument("--output-dir", type=Path, help="Override artifact output dir")
